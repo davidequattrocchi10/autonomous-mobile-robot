@@ -19,7 +19,7 @@ This project implements a complete autonomous navigation system for mobile robot
 ## 🚀 Quick Start
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/autonomous-mobile-robot.git
+git clone https://github.com/davidequattrocchi10/autonomous-mobile-robot.git
 cd autonomous-mobile-robot
 
 # Install dependencies
