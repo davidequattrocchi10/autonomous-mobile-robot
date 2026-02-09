@@ -5,6 +5,7 @@ This module provides a 2D grid environment for robot navigation.
 It handles obstacles, validation, and visualization.
 """
 
+
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import List, Tuple, Optional, Set
@@ -109,13 +110,14 @@ class GridWorld:
         self.grid = np.zeros((self.height, self.width), dtype=int)
     
     def render(self, 
-               start: Optional[Tuple[int, int]] = None,
-               goal: Optional[Tuple[int, int]] = None,
-               path: Optional[List[Tuple[int, int]]] = None,
-               visited: Optional[Set[Tuple[int, int]]] = None,
-               title: str = "Grid World") -> None:
+           start: Optional[Tuple[int, int]] = None,
+           goal: Optional[Tuple[int, int]] = None,
+           path: Optional[List[Tuple[int, int]]] = None,
+           visited: Optional[Set[Tuple[int, int]]] = None,
+           title: str = "Grid World",
+           show_legend: bool = True) -> None:
         """
-        Visualize the grid environment.
+        Visualize the grid environment with clear color coding.
         
         Args:
             start: Starting position
@@ -123,49 +125,78 @@ class GridWorld:
             path: Solution path
             visited: Explored cells
             title: Plot title
+            show_legend: Whether to show color legend
         """
-        # Create visualization grid
-        display_grid = self.grid.copy().astype(float)
+        from matplotlib.lines import Line2D
+        import matplotlib.patches as mpatches
         
-        # Mark visited cells (light gray)
+        # Create RGB image
+        # Shape: (height, width, 3) for RGB
+        display_grid = np.ones((self.height, self.width, 3))
+        
+        # Define colors (RGB format, values 0-1)
+        COLOR_FREE = np.array([1.0, 1.0, 1.0])      # White
+        COLOR_OBSTACLE = np.array([0.2, 0.2, 0.2])  # Dark gray
+        COLOR_VISITED = np.array([0.7, 0.9, 1.0])   # Light blue
+        COLOR_PATH = np.array([1.0, 0.8, 0.0])      # Yellow/Gold
+        
+        # Paint obstacles
+        obstacle_mask = self.grid == 1
+        display_grid[obstacle_mask] = COLOR_OBSTACLE
+        
+        # Paint visited cells (explored but not in path)
         if visited:
             for pos in visited:
-                if display_grid[pos] == 0:
-                    display_grid[pos] = 0.3
+                if self.grid[pos] == 0:  # Not an obstacle
+                    display_grid[pos] = COLOR_VISITED
         
-        # Mark path (darker gray)
+        # Paint path (overwrites visited for path cells)
         if path:
             for pos in path:
-                if pos != start and pos != goal:
-                    display_grid[pos] = 0.6
+                if pos != start and pos != goal and self.grid[pos] == 0:
+                    display_grid[pos] = COLOR_PATH
         
         # Create figure
         fig, ax = plt.subplots(figsize=(10, 10))
-        ax.imshow(display_grid, cmap='gray_r', vmin=0, vmax=1)
+        ax.imshow(display_grid)
         
         # Add grid lines
         ax.set_xticks(np.arange(-0.5, self.width, 1), minor=True)
         ax.set_yticks(np.arange(-0.5, self.height, 1), minor=True)
-        ax.grid(which='minor', color='lightgray', linewidth=0.5)
+        ax.grid(which='minor', color='gray', linewidth=0.5, alpha=0.3)
         
         # Labels
         ax.set_xticks(range(self.width))
         ax.set_yticks(range(self.height))
         
-        # Mark start (green circle)
+        # Mark start (large green circle)
         if start:
-            ax.plot(start[1], start[0], 'go', markersize=15, 
-                   markeredgecolor='darkgreen', markeredgewidth=2, label='Start')
+            ax.plot(start[1], start[0], 'o', color='green', markersize=20, 
+                markeredgecolor='darkgreen', markeredgewidth=3, label='Start', zorder=5)
         
-        # Mark goal (red star)
+        # Mark goal (large red star)
         if goal:
-            ax.plot(goal[1], goal[0], 'r*', markersize=20, 
-                   markeredgecolor='darkred', markeredgewidth=2, label='Goal')
+            ax.plot(goal[1], goal[0], '*', color='red', markersize=25, 
+                markeredgecolor='darkred', markeredgewidth=3, label='Goal', zorder=5)
         
-        if start or goal:
-            ax.legend(loc='upper right')
+        # Create legend
+        if show_legend:
+            legend_elements = []
+            
+            if start:
+                Line2D([0], [0], marker='o', color='green', markersize=10, markeredgecolor='darkgreen', markeredgewidth=2, linestyle='None', label='Start'),
+            if goal:
+                Line2D([0], [0], marker='*', color='red', markersize=12, markeredgecolor='darkred', markeredgewidth=2, linestyle='None', label='Goal'),
+            
+            if visited:
+                legend_elements.append(mpatches.Patch(color=COLOR_VISITED, label='Explored'))
+            if path:
+                legend_elements.append(mpatches.Patch(color=COLOR_PATH, label='Path'))
+            
+            ax.legend(handles=legend_elements, loc='upper left', fontsize=10, 
+                    framealpha=0.9, edgecolor='black')
         
-        ax.set_title(title, fontsize=14, fontweight='bold')
+        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
         plt.tight_layout()
         plt.show()
     
