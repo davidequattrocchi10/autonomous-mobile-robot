@@ -114,7 +114,8 @@ class GridWorld:
            goal: Optional[Tuple[int, int]] = None,
            path: Optional[List[Tuple[int, int]]] = None,
            visited: Optional[Set[Tuple[int, int]]] = None,
-           title: str = "Grid World",
+           stats: Optional[dict] = None,
+           ax= None,
            show_legend: bool = True) -> None:
         """
         Visualize the grid environment with clear color coding.
@@ -124,11 +125,10 @@ class GridWorld:
             goal: Goal position
             path: Solution path
             visited: Explored cells
-            title: Plot title
+            stats: Dictionary of statistics to display in title
+            ax: Matplotlib axis to draw on 
             show_legend: Whether to show color legend
         """
-        from matplotlib.lines import Line2D
-        import matplotlib.patches as mpatches
         
         # Create RGB image
         # Shape: (height, width, 3) for RGB
@@ -155,9 +155,7 @@ class GridWorld:
             for pos in path:
                 if pos != start and pos != goal and self.grid[pos] == 0:
                     display_grid[pos] = COLOR_PATH
-        
-        # Create figure
-        fig, ax = plt.subplots(figsize=(10, 10))
+
         ax.imshow(display_grid)
         
         # Add grid lines
@@ -171,34 +169,54 @@ class GridWorld:
         
         # Mark start (large green circle)
         if start:
-            ax.plot(start[1], start[0], 'o', color='green', markersize=20, 
+            ax.plot(start[1], start[0], 'o', color='green', markersize=15, 
                 markeredgecolor='darkgreen', markeredgewidth=3, label='Start', zorder=5)
         
         # Mark goal (large red star)
         if goal:
-            ax.plot(goal[1], goal[0], '*', color='red', markersize=25, 
+            ax.plot(goal[1], goal[0], '*', color='red', markersize=20, 
                 markeredgecolor='darkred', markeredgewidth=3, label='Goal', zorder=5)
-        
-        # Create legend
-        if show_legend:
-            legend_elements = []
-            
-            if start:
-                Line2D([0], [0], marker='o', color='green', markersize=10, markeredgecolor='darkgreen', markeredgewidth=2, linestyle='None', label='Start'),
-            if goal:
-                Line2D([0], [0], marker='*', color='red', markersize=12, markeredgecolor='darkred', markeredgewidth=2, linestyle='None', label='Goal'),
-            
-            if visited:
-                legend_elements.append(mpatches.Patch(color=COLOR_VISITED, label='Explored'))
-            if path:
-                legend_elements.append(mpatches.Patch(color=COLOR_PATH, label='Path'))
-            
-            ax.legend(handles=legend_elements, loc='upper left', fontsize=10, 
-                    framealpha=0.9, edgecolor='black')
-        
+
+        title = f"{stats['algorithm']}\n"
+        title += f"Path Length: {stats['path_length']} | Nodes Explored: {stats['nodes_visited']}"
         ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
-        plt.tight_layout()
-        plt.show()
+        
+        if show_legend:
+            legend_elements = self.get_legend_elements()
+
+            plt.tight_layout()
+
+            ax.legend(
+                handles=legend_elements,
+                loc='lower center',
+                ncol=len(legend_elements),
+                fontsize=12,
+                frameon=True,
+                bbox_to_anchor=(0.5, -0.15)
+            )
+
+            plt.subplots_adjust(bottom=0.18)
+
+    def get_legend_elements(self):
+        from matplotlib.lines import Line2D
+        import matplotlib.patches as mpatches
+
+        COLOR_OBSTACLE = np.array([0.2, 0.2, 0.2])
+        COLOR_VISITED = np.array([0.7, 0.9, 1.0])
+        COLOR_PATH = np.array([1.0, 0.8, 0.0])
+
+        return [
+            Line2D([0], [0], marker='o', color='green', markersize=10,
+                markeredgecolor='darkgreen', markeredgewidth=2,
+                linestyle='None', label='Start'),
+            Line2D([0], [0], marker='*', color='red', markersize=12,
+                markeredgecolor='darkred', markeredgewidth=2,
+                linestyle='None', label='Goal'),
+            mpatches.Patch(color=COLOR_OBSTACLE, label='Obstacle'),
+            mpatches.Patch(color=COLOR_VISITED, label='Explored'),
+            mpatches.Patch(color=COLOR_PATH, label='Path'),
+        ]
+
     
     def __repr__(self) -> str:
         """String representation for debugging."""
