@@ -26,7 +26,7 @@ cd autonomous-mobile-robot
 pip install -r requirements.txt
 
 # Run a demo
-python examples/basic_navigation.py
+python examples/compare_algorithms.py
 ```
 
 ## 📊 Project Status

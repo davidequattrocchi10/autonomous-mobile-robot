@@ -1,8 +1,15 @@
 """
-Compare BFS, DFS, and A* algorithms.
+Compare BFS, DFS, A*, and RRT algorithms.
 
 This script demonstrates the differences between algorithms
 with clear, colorful visualizations.
+
+Key comparison:
+  BFS   → shortest path, explores many nodes (exhaustive, level-by-level)
+  DFS   → not shortest, explores deeply (exhaustive, depth-first)
+  A*    → shortest path, explores fewest nodes (heuristic-guided)
+  RRT   → not guaranteed shortest, but finds a path quickly via random
+           sampling — shines in cluttered and high-dimensional spaces
 """
 
 import sys
@@ -10,6 +17,7 @@ sys.path.append('.')
 
 from src.environment.grid_world import GridWorld
 from src.planning.graph_search import BFS, DFS, AStar
+from src.planning.rrt import RRT
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -61,10 +69,13 @@ def run_comparison():
     goal = (18, 18)
     
     # Initialize algorithms
+    # RRT uses seed=None so every run shows a different random tree —
+    # this is intentional: it illustrates the probabilistic nature of RRT.
     algorithms = [
         BFS(env),
         DFS(env),
         AStar(env, heuristic='manhattan'),
+        RRT(env, max_iterations=3000, goal_bias=0.15),
     ]
     
     # Run each algorithm
@@ -88,20 +99,20 @@ def run_comparison():
     print("="*60)
     
     
-    fig, axes = plt.subplots(1, 3, figsize=(20, 15))
+    fig, axes = plt.subplots(1, 4, figsize=(28, 8))
     
     for idx, (algo, path, stats) in enumerate(results):
         ax = axes[idx]
         env.render( start=start, goal=goal, path=path, visited=algo.visited, stats=stats, ax=ax, show_legend=False  )
         
-    legend_elements = env.get_legend_elements() 
-    axes[1].legend(handles=legend_elements, 
-              loc='lower center', 
-              ncol=len(legend_elements), 
-              fontsize=12, 
-              frameon=True, 
-              bbox_to_anchor=(0.5, -0.18) ) 
-    plt.subplots_adjust(bottom=0.30)
+    legend_elements = env.get_legend_elements()
+    axes[2].legend(handles=legend_elements,
+              loc='lower center',
+              ncol=len(legend_elements),
+              fontsize=10,
+              frameon=True,
+              bbox_to_anchor=(0.5, -0.18))
+    plt.subplots_adjust(bottom=0.25)
     
     plt.tight_layout()
     
@@ -122,28 +133,39 @@ def run_comparison():
     print("ALGORITHM COMPARISON:")
     print("="*60)
     
-    bfs_stats = results[0][2]
-    dfs_stats = results[1][2]
+    bfs_stats   = results[0][2]
+    dfs_stats   = results[1][2]
     astar_stats = results[2][2]
-    
+    rrt_stats   = results[3][2]
+
     print(f"\n📊 BFS:")
-    print(f"   Path length: {bfs_stats['path_length']} ← OPTIMAL (shortest)")
+    print(f"   Path length:    {bfs_stats['path_length']} ← OPTIMAL (shortest)")
     print(f"   Nodes explored: {bfs_stats['nodes_visited']} ← Explores MANY nodes")
-    print(f"   ✓ Guarantees shortest path")
-    print(f"   ✗ Memory intensive (explores many nodes)")
-    
+    print(f"   ✓ Guarantees shortest path on unweighted grids")
+    print(f"   ✗ Memory intensive (stores entire frontier)")
+
     print(f"\n📊 DFS:")
-    print(f"   Path length: {dfs_stats['path_length']} ← May be LONGER")
+    print(f"   Path length:    {dfs_stats['path_length']} ← May be LONGER")
     print(f"   Nodes explored: {dfs_stats['nodes_visited']}")
-    print(f"   ✓ Memory efficient")
+    print(f"   ✓ Memory efficient (only stores current path)")
     print(f"   ✗ Doesn't guarantee shortest path")
-    
+
     print(f"\n📊 A* (Manhattan):")
-    print(f"   Path length: {astar_stats['path_length']} ← OPTIMAL (same as BFS)")
+    print(f"   Path length:    {astar_stats['path_length']} ← OPTIMAL (same as BFS)")
     print(f"   Nodes explored: {astar_stats['nodes_visited']} ← FEWER than BFS!")
     print(f"   ✓ Guarantees shortest path")
-    print(f"   ✓ More efficient than BFS (explores fewer nodes)")
-    print(f"   ✓ BEST CHOICE for known environments!")
+    print(f"   ✓ Most efficient — best for known, static environments")
+
+    print(f"\n📊 RRT:")
+    if rrt_stats['success']:
+        print(f"   Path length:    {rrt_stats['path_length']} ← NOT guaranteed optimal")
+    else:
+        print(f"   Path length:    N/A (path not found — try more iterations)")
+    print(f"   Nodes in tree:  {rrt_stats['nodes_visited']} ← grows randomly, not exhaustively")
+    print(f"   ✓ Probabilistically complete")
+    print(f"   ✓ Shines in high-dimensional / continuous spaces")
+    print(f"   ✗ Path is longer than necessary (use RRT* for optimality)")
+    print(f"   ✗ Results vary between runs (probabilistic — try it again!)")
 
 if __name__ == "__main__":
     run_comparison()
