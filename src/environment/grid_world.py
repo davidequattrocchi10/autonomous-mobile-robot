@@ -109,26 +109,33 @@ class GridWorld:
         """Clear all obstacles."""
         self.grid = np.zeros((self.height, self.width), dtype=int)
     
-    def render(self, 
+    def render(self,
            start: Optional[Tuple[int, int]] = None,
            goal: Optional[Tuple[int, int]] = None,
            path: Optional[List[Tuple[int, int]]] = None,
            visited: Optional[Set[Tuple[int, int]]] = None,
            stats: Optional[dict] = None,
+           title: Optional[str] = None,
            ax= None,
            show_legend: bool = True) -> None:
         """
         Visualize the grid environment with clear color coding.
-        
+
         Args:
             start: Starting position
             goal: Goal position
             path: Solution path
             visited: Explored cells
-            stats: Dictionary of statistics to display in title
-            ax: Matplotlib axis to draw on 
+            stats: Dictionary of statistics to display in title (takes priority over title)
+            title: Plain string title shown when stats is not provided
+            ax: Matplotlib axis to draw on; if None, a new figure is created automatically
             show_legend: Whether to show color legend
         """
+        # When no axis is given, create a standalone figure so callers don't
+        # need to manage matplotlib figures themselves.
+        standalone = ax is None
+        if standalone:
+            fig, ax = plt.subplots(figsize=(8, 8))
         
         # Create RGB image
         # Shape: (height, width, 3) for RGB
@@ -177,9 +184,17 @@ class GridWorld:
             ax.plot(goal[1], goal[0], '*', color='red', markersize=20, 
                 markeredgecolor='darkred', markeredgewidth=3, label='Goal', zorder=5)
 
-        title = f"{stats['algorithm']}\n"
-        title += f"Path Length: {stats['path_length']} | Nodes Explored: {stats['nodes_visited']}"
-        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+        # Build title: prefer detailed stats string, fall back to plain title arg.
+        if stats is not None:
+            title_str = f"{stats['algorithm']}\n"
+            title_str += f"Path Length: {stats['path_length']} | Nodes Explored: {stats['nodes_visited']}"
+        elif title is not None:
+            title_str = title
+        else:
+            title_str = None
+
+        if title_str:
+            ax.set_title(title_str, fontsize=14, fontweight='bold', pad=20)
         
         if show_legend:
             legend_elements = self.get_legend_elements()
@@ -196,6 +211,10 @@ class GridWorld:
             )
 
             plt.subplots_adjust(bottom=0.18)
+
+        # Show the figure when we created it internally (standalone call).
+        if standalone:
+            plt.show()
 
     def get_legend_elements(self):
         from matplotlib.lines import Line2D

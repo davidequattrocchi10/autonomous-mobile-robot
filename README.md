@@ -32,8 +32,8 @@ python examples/basic_navigation.py
 ## 📊 Project Status
 
 - [x] Project structure
-- [ ] Environment simulation
-- [ ] Path planning algorithms
+- [X] Environment simulation
+- [X] Path planning algorithms
 - [ ] Reinforcement learning
 - [ ] Dynamic obstacle avoidance
 - [ ] Sensor simulation
