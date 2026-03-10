@@ -288,7 +288,7 @@ class QLearningAgent:
                 self._bellman_update(state, action, reward, next_state)
 
                 state        = next_state
-                total_reward += rewar
+                total_reward += reward
 
                 # Check if episode is done (goal reached)
                 if done:
