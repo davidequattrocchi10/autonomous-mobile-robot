@@ -12,6 +12,7 @@ Key comparison:
            sampling — shines in cluttered and high-dimensional spaces
 """
 
+import os
 import sys
 sys.path.append('.')
 
@@ -116,7 +117,8 @@ def run_comparison():
     
     plt.tight_layout()
     
-    plt.savefig('algorithm_comparison.png', dpi=150, bbox_inches='tight') 
+    os.makedirs('images', exist_ok=True)
+    plt.savefig('images/algorithm_comparison.png', dpi=150, bbox_inches='tight')
     plt.show()
     # Print analysis
     print("\n" + "="*60)

@@ -25,6 +25,7 @@ The policy visualisation is the key insight: the agent hasn't just
 learned one path — it has learned what to do from EVERY reachable cell.
 """
 
+import os
 import sys
 sys.path.append('.')
 
@@ -106,7 +107,7 @@ def draw_policy_arrows(ax, agent, env, start, goal):
             xs.append(col)     # arrow x-position = column
             ys.append(row)     # arrow y-position = row
             us.append(dc)      # arrow x-direction = Δcol
-            vs.append(dr)      # arrow y-direction = Δrow
+            vs.append(-dr)      # arrow y-direction = Δrow (negated for imshow y-axis)
 
             # Colour by Q-value magnitude: brighter = agent is more confident
             max_q = float(np.max(agent.get_q_values((row, col))))
@@ -281,8 +282,9 @@ def run():
     )
 
     plt.tight_layout()
-    plt.savefig('qlearning_result.png', dpi=150, bbox_inches='tight')
-    print("\nFigure saved → qlearning_result.png")
+    os.makedirs('images', exist_ok=True)
+    plt.savefig('images/qlearning_result.png', dpi=150, bbox_inches='tight')
+    print("\nFigure saved → images/qlearning_result.png")
     plt.show()
 
     # -----------------------------------------------------------------------
