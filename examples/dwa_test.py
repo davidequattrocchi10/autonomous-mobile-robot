@@ -23,9 +23,10 @@ position.
 
 Control loop each step:
   1. LIDAR scans the environment
-  2. DWA selects best (v, ω) to reach the CURRENT A* waypoint
-  3. Robot executes the command
-  4. If within waypoint_threshold of current waypoint → advance to next one
+  2. find_lookahead_target() finds the furthest A* waypoint within lookahead_distance
+  3. DWA selects best (v, ω) to reach that lookahead point (not the immediate next cell)
+  4. Robot executes the command
+  5. If within waypoint_threshold of current waypoint → advance waypoint_index
 
 Run from project root:
     python examples/dwa_test.py
@@ -35,6 +36,7 @@ import sys
 sys.path.append('.')
 
 import math
+from typing import List, Tuple
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -136,6 +138,83 @@ def draw_astar_path(ax, waypoints):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Lookahead targeting
+# ──────────────────────────────────────────────────────────────────────────────
+
+def find_lookahead_target(
+    robot_x: float,
+    robot_y: float,
+    waypoints: List[Tuple[float, float]],
+    current_index: int,
+    lookahead_distance: float,
+) -> Tuple[float, float, int]:
+    """
+    Find the furthest A* waypoint that is still within lookahead_distance
+    of the robot's current position.
+
+    WHY lookahead instead of the immediate next waypoint?
+    -------------------------------------------------------
+    When DWA aims at the cell directly ahead (~0.5 m away), the heading
+    score gradient is very narrow: the robot must be almost perfectly aligned
+    with a single cell before DWA "sees" it. At corners, the robot is still
+    at speed when it reaches the corner cell and overshoots into the wall gap
+    before DWA can react.
+
+    Aiming 1–2 m ahead gives DWA a target it can "see" earlier. It begins
+    curving toward the corner long before reaching it → smoother arcs,
+    less corner-clipping.
+
+    Algorithm
+    ---------
+    1. Near-end guard: within the last 3 waypoints, return the final
+       waypoint directly so the robot homes in precisely on the goal.
+    2. Walk forward from current_index through all remaining waypoints.
+       Record the index of every waypoint whose distance from the robot
+       is ≤ lookahead_distance. No early break: the A* path may curve so
+       a later waypoint can re-enter the lookahead circle.
+    3. Fallback: if even waypoints[current_index] is beyond
+       lookahead_distance (pathological case), return it unchanged —
+       same behaviour as the previous one-step targeting.
+
+    Parameters
+    ----------
+    robot_x, robot_y : float
+        Current robot position in continuous coordinates (metres).
+    waypoints : list of (x, y) tuples
+        Full A* path converted to continuous coordinates.
+    current_index : int
+        The waypoint the robot is currently advancing toward.
+    lookahead_distance : float
+        How far ahead (metres) to search for a target waypoint.
+
+    Returns
+    -------
+    (target_x, target_y, furthest_index) : Tuple[float, float, int]
+        The lookahead target coordinates and its index in `waypoints`.
+        The caller can optionally use furthest_index to skip ahead in
+        waypoint_index, but the advancement logic is independent.
+    """
+    n = len(waypoints)
+
+    # Near-end guard: home in on the final waypoint precisely.
+    # Without this, lookahead could jump PAST the goal on the last few cells.
+    if current_index >= n - 3:
+        return (*waypoints[-1], n - 1)
+
+    # Walk forward, recording the furthest waypoint within lookahead_distance.
+    # Start with current_index as the fallback so we always return something.
+    furthest_index = current_index
+
+    for i in range(current_index, n):
+        wx, wy = waypoints[i]
+        dist = math.sqrt((wx - robot_x) ** 2 + (wy - robot_y) ** 2)
+        if dist <= lookahead_distance:
+            furthest_index = i   # keep pushing the lookahead forward
+
+    return (*waypoints[furthest_index], furthest_index)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Main simulation loop
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -169,7 +248,8 @@ def main():
     # Start at index 1: the robot is already at waypoints[0] (the start cell),
     # so we skip it and aim for the first real intermediate target immediately.
     waypoint_index = 1
-    waypoint_threshold = 0.6   # metres — how close = "waypoint reached"
+    waypoint_threshold  = 0.6   # metres — how close = "waypoint reached"
+    lookahead_distance  = 1.0   # metres — how far ahead to aim along the A* path
 
     print(f"Start:     {grid_to_continuous(start_row, start_col, CELL)}")
     print(f"Goal:      ({goal_x:.2f}, {goal_y:.2f})")
@@ -194,9 +274,10 @@ def main():
         v_samples=8,
         omega_samples=16,
         clearance_cap=1.5,
-        w_heading=1.5,
-        w_clearance=1.0,
-        w_velocity=0.5,
+        # More balanced
+        w_heading=0.7,   # robot steers toward waypoint but not rigidly
+        w_clearance=0.2,
+        w_velocity=0.1,  # speed is a small bonus, not a strong drive
     )
     print(dwa)
 
@@ -227,20 +308,26 @@ def main():
             print(f"✓ Goal reached in {step} steps!")
             break
 
-        # ── Pick the current A* waypoint as the DWA local target ───────
-        # Always aim at the current waypoint, not the distant final goal.
-        # This keeps DWA's trajectory horizon short and unobstructed.
+        # ── Waypoint for advancement check (unchanged logic) ───────────
         wp_x, wp_y = waypoints[waypoint_index]
+
+        # ── Lookahead target for DWA ────────────────────────────────────
+        # Instead of aiming at the immediate next cell (0.5 m away),
+        # look up to lookahead_distance ahead along the A* path so the
+        # robot starts turning corners earlier and clips less.
+        target_x, target_y, lookahead_idx = find_lookahead_target(
+            x, y, waypoints, waypoint_index, lookahead_distance
+        )
 
         # 1. Sense
         ranges    = lidar.scan(x, y, theta)
         endpoints = lidar.get_endpoints(x, y, theta, ranges)
         obstacles = endpoints[ranges < lidar.max_range]   # filter phantoms
 
-        # 2. Plan (DWA targets current waypoint)
+        # 2. Plan (DWA targets the lookahead point, not the immediate waypoint)
         v_cmd, omega_cmd, ok = dwa.compute_command(
             x, y, theta, v_cur, omega_cur,
-            wp_x, wp_y, obstacles,
+            target_x, target_y, obstacles,
         )
 
         if not ok:
@@ -253,17 +340,21 @@ def main():
         history.append((robot.x, robot.y))
 
         # ── Advance waypoint if we're close enough ─────────────────────
-        # Check AFTER moving so the new position is used for the distance.
+        # Advancement still uses the distance to waypoints[waypoint_index]
+        # (the immediate next cell), not the lookahead target. This keeps
+        # waypoint_index progressing steadily along the path.
         dist_to_wp = math.sqrt((robot.x - wp_x)**2 + (robot.y - wp_y)**2)
         if dist_to_wp < waypoint_threshold and waypoint_index < len(waypoints) - 1:
             waypoint_index += 1
 
-        # Store for the right panel close-up
-        last_scan_data = (x, y, theta, ranges, endpoints, obstacles, v_cmd, omega_cmd)
+        # Store for the right panel close-up (include lookahead target)
+        last_scan_data = (x, y, theta, ranges, endpoints, obstacles,
+                          v_cmd, omega_cmd, target_x, target_y)
 
         if step % 10 == 0:
             print(f"Step {step:3d}: pos=({x:.2f},{y:.2f})  "
                   f"wp={waypoint_index}/{len(waypoints)-1}  "
+                  f"la={lookahead_idx}  "
                   f"v={v_cmd:.2f}  ω={omega_cmd:.2f}  dist_goal={dist_to_goal:.2f}")
     else:
         print("Max steps reached without reaching goal.")
@@ -293,11 +384,11 @@ def main():
 
     # ── Right panel: last-step trajectory fan ──────────────────────────
     if last_scan_data:
-        lx, ly, lt, lranges, lendpoints, lobs, lv, lw = last_scan_data
+        lx, ly, lt, lranges, lendpoints, lobs, lv, lw, ltgt_x, ltgt_y = last_scan_data
         env.render(ax=ax_close, show_legend=False)
         ax_close.set_title(
             f"Last step — DWA trajectory fan\n"
-            f"cyan=safe  pink=collision   v={lv:.2f} m/s  ω={lw:.2f} rad/s",
+            f"cyan circle = lookahead target   v={lv:.2f} m/s  ω={lw:.2f} rad/s",
             fontsize=10,
         )
         draw_trajectories(ax_close, dwa, lx, ly, lt, v_cur, omega_cur, lobs)
@@ -305,11 +396,16 @@ def main():
         draw_robot(ax_close, lx, ly, lt)
         ax_close.plot(gx_p, gy_p, '*', color='red', markersize=18,
                       markeredgecolor='darkred', markeredgewidth=2, zorder=9)
-        # Show the current waypoint the robot was aiming at in the last step
+        # Show the current waypoint index marker (purple diamond)
         cwx, cwy = c2p(*waypoints[min(waypoint_index, len(waypoints) - 1)])
         ax_close.plot(cwx, cwy, 'D', color='mediumpurple', markersize=8,
-                      markeredgecolor='indigo', markeredgewidth=2, zorder=9,
-                      label='Current waypoint')
+                      markeredgecolor='indigo', markeredgewidth=2, zorder=9)
+        # Cyan circle: the lookahead target DWA was actually aiming at.
+        # This lets us verify the lookahead is jumping ahead of the current
+        # waypoint (it should be further along the path than the purple diamond).
+        ltx, lty = c2p(ltgt_x, ltgt_y)
+        ax_close.plot(ltx, lty, 'o', color='cyan', markersize=10,
+                      markeredgecolor='deepskyblue', markeredgewidth=2, zorder=12)
 
     # ── Legend ─────────────────────────────────────────────────────────
     legend_elements = [
@@ -323,8 +419,10 @@ def main():
         Line2D([0], [0], color='cyan', linewidth=1.5, label='Safe traj.'),
         Line2D([0], [0], color='lightcoral', linewidth=1.5, label='Collision traj.'),
         Line2D([0], [0], color='red', linewidth=1, alpha=0.5, label='LIDAR hit'),
+        Line2D([0], [0], marker='o', color='cyan', markersize=8,
+               markeredgecolor='deepskyblue', linestyle='None', label='Lookahead target'),
     ]
-    fig.legend(handles=legend_elements, loc='lower center', ncol=7,
+    fig.legend(handles=legend_elements, loc='lower center', ncol=8,
                fontsize=10, frameon=True, bbox_to_anchor=(0.5, 0.01))
 
     plt.tight_layout(rect=[0, 0.06, 1, 1])
