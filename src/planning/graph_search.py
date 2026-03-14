@@ -11,6 +11,9 @@ from typing import List, Tuple, Optional, Set, Dict
 from abc import ABC, abstractmethod
 import time
 
+import numpy as np
+from src.utils.conversions import DEFAULT_CELL_SIZE
+
 
 class PathPlanner(ABC):
     """
@@ -225,6 +228,47 @@ class AStar(PathPlanner):
     Space complexity: O(V)
     """
     
+    def _compute_clearance_map(self) -> np.ndarray:
+        """
+        Multi-source BFS from every obstacle cell outward.
+
+        Returns a 2D integer array (same shape as the grid) where each
+        free cell holds its Manhattan distance (in cells) to the nearest
+        obstacle. Obstacle cells themselves get distance 0.
+
+        WHY multi-source BFS?
+        Starting BFS simultaneously from ALL obstacle cells is equivalent
+        to asking "how far is each free cell from the nearest obstacle?"
+        in a single O(W × H) pass.
+        With the naive approach would be: For each free cell, check every obstacle cell
+        and find minimum distance - This is O(n²) — very slow on large grids.
+
+        """
+        grid = self.env.grid          # numpy array, 1 = obstacle, 0 = free
+        rows, cols = grid.shape
+        clearance = np.full((rows, cols), fill_value=rows + cols, dtype=int)
+
+        queue = deque()
+
+        # Seed: every obstacle cell starts at distance 0
+        for r in range(rows):
+            for c in range(cols):
+                if grid[r, c] == 1:
+                    clearance[r, c] = 0
+                    queue.append((r, c))
+
+        # BFS flood-fill outward
+        while queue:
+            r, c = queue.popleft()
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < rows and 0 <= nc < cols:
+                    if clearance[nr][nc] > clearance[r][c] + 1:
+                        clearance[nr][nc] = clearance[r][c] + 1
+                        queue.append((nr, nc))
+
+        return clearance
+
     def __init__(self, environment, heuristic='manhattan'):
         """
         Initialize A* planner.
@@ -260,17 +304,40 @@ class AStar(PathPlanner):
         else:
             raise ValueError(f"Unknown heuristic: {self.heuristic_type}")
     
-    def search(self, start: Tuple[int, int], goal: Tuple[int, int]) -> Optional[List[Tuple[int, int]]]:
-        """A* implementation."""
-        
+    def search(
+        self,
+        start: Tuple[int, int],
+        goal: Tuple[int, int],
+        robot_radius: float = 0.0,
+        cell_size: float = DEFAULT_CELL_SIZE,
+    ) -> Optional[List[Tuple[int, int]]]:
+        """
+        A* implementation with optional clearance-aware cost.
+
+        Args:
+            start: (row, col) start cell
+            goal: (row, col) goal cell
+            robot_radius: Physical robot radius in metres. When > 0, cells
+                closer than this distance to any obstacle receive a step-cost
+                penalty, so A* naturally prefers wider corridors. Set to 0.0
+                (default) for standard uniform-cost A* (backward compatible).
+            cell_size: Grid cell size in metres (default: DEFAULT_CELL_SIZE).
+                Used to convert clearance-in-cells to clearance-in-metres.
+        """
+
         # Validation
         if not self.env.is_valid(*start):
             raise ValueError(f"Start position {start} is not valid!")
         if not self.env.is_valid(*goal):
             raise ValueError(f"Goal position {goal} is not valid!")
-        
+
         # Initialize
         start_time = time.time()
+
+        # Precompute clearance map once per search (only when clearance cost is enabled)
+        if robot_radius > 0.0:
+            clearance_map = self._compute_clearance_map()
+            danger_radius = robot_radius   # convenience alias
         
         # g_score[n] = cost of cheapest path from start to n
         g_score = {start: 0}
@@ -318,8 +385,20 @@ class AStar(PathPlanner):
                 if neighbor in self.visited:
                     continue
                 
-                # Calculate tentative g_score
-                tentative_g = g_score[current] + 1  # Cost to move to neighbor
+                # Base cost: 1 step. Add clearance penalty when near obstacles.
+                if robot_radius > 0.0:
+                    nr, nc = neighbor
+                    clearance_metres = clearance_map[nr][nc] * cell_size
+                    if clearance_metres < danger_radius:
+                        # Penalty grows as clearance shrinks toward 0.
+                        # Capped denominator (0.01 m) prevents division by zero.
+                        step_cost = 1.0 + danger_radius / max(clearance_metres, 0.01)
+                    else:
+                        step_cost = 1.0
+                else:
+                    step_cost = 1.0
+
+                tentative_g = g_score[current] + step_cost  # Cost to move to neighbor
                 
                 # If this is a better path to neighbor
                 if neighbor not in g_score or tentative_g < g_score[neighbor]:

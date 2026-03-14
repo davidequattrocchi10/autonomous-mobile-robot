@@ -235,7 +235,7 @@ def main():
     # Plan the full path ONCE before the loop. DWA will chase the waypoints
     # one by one instead of aiming at the distant final goal directly.
     astar = AStar(env, heuristic='manhattan')
-    grid_path = astar.search((start_row, start_col), (goal_row, goal_col))
+    grid_path = astar.search((start_row, start_col), (goal_row, goal_col), 0.6)
 
     if grid_path is None:
         print("ERROR: A* found no path from start to goal. Check the environment.")

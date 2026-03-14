@@ -384,3 +384,105 @@ class TestAStar:
 
         # A* visits fewer or equal nodes (strictly fewer on non-trivial grids)
         assert astar_nodes <= bfs_nodes
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# A* Clearance-Aware Cost Tests
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def corridor_env():
+    """
+    5×5 grid with two vertical walls flanking a single-cell corridor at col=2.
+
+       col: 0  1  2  3  4
+    row 0:  .  X  S  X  .
+    row 1:  .  X  .  X  .
+    row 2:  .  X  .  X  .
+    row 3:  .  X  .  X  .
+    row 4:  .  X  G  X  .
+
+    Start=(0,2)  Goal=(4,2)
+    The ONLY path goes straight down col=2 (corridor width = 1 cell).
+
+    WHY start/goal are inside col=2:
+    Walls at col=1 and col=3 span all rows, so the exterior (col=0, col=4)
+    is completely disconnected from the corridor. Placing start and goal
+    directly inside the corridor ensures the path exists while still
+    testing that clearance penalty does NOT block the only passable route.
+    """
+    env = GridWorld(width=5, height=5)
+    for row in range(5):   # wall at col=1, all rows
+        env.add_obstacle(row, 1)
+    for row in range(5):   # wall at col=3, all rows
+        env.add_obstacle(row, 3)
+    return env
+
+
+class TestAStarClearance:
+
+    def test_clearance_path_length_equals_standard(self, corridor_env):
+        """
+        With robot_radius=0.0 AND robot_radius=0.2, A* must find a path of
+        the same length through the single-cell corridor.
+
+        WHY: clearance penalty increases cost but must never block a
+        passable gap — the path still exists, just costs more.
+        Backward-compatibility check: robot_radius=0.0 behaves like classic A*.
+        """
+        astar = AStar(corridor_env, heuristic='manhattan')
+        path_standard = astar.search((0, 2), (4, 2), robot_radius=0.0)
+        path_clearance = astar.search((0, 2), (4, 2), robot_radius=0.2)
+
+        assert path_standard is not None
+        assert path_clearance is not None
+        assert len(path_standard) == len(path_clearance)
+
+    def test_clearance_prefers_center_on_wide_grid(self):
+        """
+        On a fully open 5×5 grid, clearance-aware A* should route through
+        the centre row (row=2) — furthest from the boundary walls — rather
+        than hugging the edges.
+
+        WHY: boundary cells have clearance 0 (adjacent to the grid edge,
+        which the BFS treats as an obstacle wall), so they accumulate
+        penalty. The centre row is equidistant from all four walls and
+        incurs no penalty.
+        """
+        env = GridWorld(width=5, height=5)
+        astar = AStar(env, heuristic='manhattan')
+        path = astar.search((2, 0), (2, 4), robot_radius=0.2)
+
+        assert path is not None
+        # Every cell in the path should stay on the centre row
+        for cell in path:
+            assert cell[0] == 2, f"Expected row 2, got row {cell[0]} at {cell}"
+
+    def test_clearance_backward_compat_path_length(self, walled_env):
+        """
+        robot_radius=0.0 must behave exactly like classic A*:
+        path length on the standard walled fixture == 13.
+        """
+        astar = AStar(walled_env, heuristic='manhattan')
+        path = astar.search((0, 0), (0, 4), robot_radius=0.0)
+        assert path is not None
+        assert len(path) == OPTIMAL_PATH_LENGTH
+
+    def test_clearance_no_path_still_returns_none(self, isolated_env):
+        """
+        When the goal is unreachable, clearance-aware search must still
+        return None — not raise an exception or return an empty list.
+        """
+        astar = AStar(isolated_env)
+        path = astar.search((0, 0), (2, 2), robot_radius=0.2)
+        assert path is None
+
+    def test_clearance_stats_keys_preserved(self, walled_env):
+        """
+        get_stats() must contain all required keys even after a
+        clearance-aware search. The new feature must not break the stats
+        contract consumed by compare_algorithms.py and render().
+        """
+        astar = AStar(walled_env)
+        astar.search((0, 0), (0, 4), robot_radius=0.2)
+        assert REQUIRED_STATS_KEYS.issubset(astar.get_stats().keys())
