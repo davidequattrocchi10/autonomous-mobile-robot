@@ -11,9 +11,8 @@ picked order package.
 
 The warehouse is operational during the run: a forklift crosses the main traffic
 aisle (row=12) while the AGV is mid-route. The AGV's LiDAR detects the forklift,
-the DWA local planner begins failing, and after 3 consecutive failures the system
-triggers an automatic A* replan. The robot reroutes safely around the hazard and
-completes the delivery.
+the DWA local planner yields by decelerating and making micro-corrections until
+the obstacle clears, then resumes toward the goal.
 
 Components demonstrated
 ------------------------
@@ -50,7 +49,6 @@ import matplotlib
 matplotlib.use('Agg')   # non-interactive backend — works headless and for GIF export
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from matplotlib.lines import Line2D
 from matplotlib.animation import FuncAnimation, PillowWriter
 
 from src.environment.grid_world import GridWorld
@@ -113,8 +111,8 @@ WAREHOUSE_CONFIG = {
     # Dynamic obstacle — forklift crossing the main aisle at row=12
     # Row 12 is clear: picking shelves were shortened to rows 2-11 (Option C)
     'forklift_start': (12, 0),      # enters from the left warehouse wall
-    'forklift_activation_step': 8, # frame at which the forklift appears
-    'forklift_speed_steps': 5, # frames per 1-cell move (slow, realistic)
+    'forklift_activation_step': 1, # frame at which the forklift appears
+    'forklift_speed_steps': 7, # frames per 1-cell move (slow, realistic)
 
     # Animation
     'max_frames': 350,
@@ -243,6 +241,93 @@ def find_lookahead_target(
             furthest_index = i
 
     return (*waypoints[furthest_index], furthest_index)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Predictive collision check  (module-level for testability)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _check_predictive_collision(
+    robot_x: float,
+    robot_y: float,
+    robot_theta: float,
+    v_cmd: float,
+    omega_cmd: float,
+    control_dt: float,
+    forklift_active: bool,
+    forklift_cells_next: List[Tuple[int, int]],
+    robot_radius: float,
+    cell_size: float,
+) -> bool:
+    """
+    Return True if the robot's NEXT position would overlap with the forklift's
+    NEXT position, indicating an imminent collision.
+
+    WHY this function is needed
+    ----------------------------
+    LiDAR only sees the forklift at its CURRENT grid cell. If the robot and
+    forklift are moving toward the same cell in the same frame, neither DWA
+    nor LiDAR detects the conflict — DWA picks a command it believes is safe,
+    and the robot walks straight into the forklift.
+
+    This check closes that one-step lookahead gap: it runs AFTER DWA selects
+    a command but BEFORE the robot executes it, giving a final veto.
+
+    Algorithm
+    ----------
+    1. Predict robot's next continuous position via first-order Euler integration
+    2. If forklift is not active or has no predicted cells: safe, return False.
+    3. For each forklift cell in forklift_cells_next:
+           Convert cell (r, c) → cell-centre continuous coords
+           dist = Euclidean distance from next robot pos to cell centre
+           If dist < robot_radius + cell_size: COLLISION → return True
+    4. All cells checked without a hit → return False.
+
+    Parameters
+    ----------
+    robot_x, robot_y, robot_theta : float
+        Current robot pose (metres, radians).
+    v_cmd, omega_cmd : float
+        Velocity commands DWA selected (omega not used — Euler integration
+        for position only, heading change is small over one control_dt).
+    control_dt : float
+        Length of one control step in seconds.
+    forklift_active : bool
+        Whether the forklift is live in this simulation step.
+    forklift_cells_next : list of (row, col)
+        Grid cells the forklift is predicted to occupy AFTER its next move.
+        Computed from current position + velocity WITHOUT calling update_all().
+    robot_radius : float
+        Physical robot radius in metres (matches DWA robot_radius).
+    cell_size : float
+        Grid cell size in metres (used to compute cell-centre coordinates).
+
+    Returns
+    -------
+    bool
+        True → emergency stop required; False → safe to execute command.
+    """
+    if not forklift_active or not forklift_cells_next:
+        return False
+
+    # Step 1: robot's predicted next position (Euler, first-order)
+    next_x = robot_x + v_cmd * math.cos(robot_theta) * control_dt
+    next_y = robot_y + v_cmd * math.sin(robot_theta) * control_dt
+
+    # Step 3: distance check against every predicted forklift cell
+    # Threshold: robot_radius (robot footprint) + cell_size (forklift footprint).
+    # This is conservative — better to stop unnecessarily than to collide.
+    collision_threshold = robot_radius + cell_size
+
+    for (r, c) in forklift_cells_next:
+        # Cell centre in continuous space (same formula as grid_to_continuous)
+        fx = (c + 0.5) * cell_size
+        fy = (r + 0.5) * cell_size
+        dist = math.sqrt((next_x - fx) ** 2 + (next_y - fy) ** 2)
+        if dist < collision_threshold:
+            return True   # imminent collision — veto the command
+
+    return False   # all cells safe
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -462,12 +547,35 @@ def main():
             target_x, target_y, obstacles,
         )
 
-        # ── 10. Failure counting + replan ───────────────────────────────
+        # ── 10. Failure counting ─────────────────────────────────────────
         if not ok:
             consecutive_failures += 1
             v_cmd, omega_cmd = 0.0, 0.0   # stop while blocked
         else:
             consecutive_failures = 0
+
+        # ──   Predictive collision check ──────────────────────────────
+        # Compute where the forklift will be AFTER its next move (read-only).
+        # This closes the one-frame blind spot: LiDAR sees the forklift at its
+        # CURRENT cell, but both robot and forklift may move into the same cell
+        # in this frame. The check runs after DWA selects a command but before
+        # robot.update() so we can veto the command if needed.
+        if forklift_active:
+            forklift_obs = obs_manager.obstacles[forklift_id]
+            dr, dc = forklift_obs.velocity
+            pred = (forklift_obs.position[0] + dr, forklift_obs.position[1] + dc)
+            forklift_cells_next = (
+                [pred]
+                if 0 <= pred[0] < env.height and 0 <= pred[1] < env.width
+                else []
+            )
+            if _check_predictive_collision(
+                x, y, theta, v_cmd, omega_cmd,
+                cfg['control_dt'], True, forklift_cells_next,
+                cfg['robot_radius'], cfg['cell_size'],
+            ):
+                v_cmd, omega_cmd = 0.0, 0.0   # emergency stop
+                consecutive_failures += 1      # counts toward replan threshold
 
         if consecutive_failures >= cfg['replan_threshold']:
             r_cur, c_cur = continuous_to_grid(x, y, CELL)
