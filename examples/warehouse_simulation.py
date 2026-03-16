@@ -111,7 +111,7 @@ WAREHOUSE_CONFIG = {
     # Dynamic obstacle — forklift crossing the main aisle at row=12
     # Row 12 is clear: picking shelves were shortened to rows 2-11 (Option C)
     'forklift_start': (12, 0),      # enters from the left warehouse wall
-    'forklift_activation_step': 1, # frame at which the forklift appears
+    'forklift_activation_step': 5, # frame at which the forklift appears
     'forklift_speed_steps': 7, # frames per 1-cell move (slow, realistic)
 
     # Animation
@@ -119,8 +119,8 @@ WAREHOUSE_CONFIG = {
     'interval_ms': 80,              # ≈ 12 fps
 
     # Output paths
-    'gif_path': 'images/warehouse_simulation_3.gif',
-    'png_path': 'images/warehouse_simulation_final_3.png',
+    'gif_path': 'images/warehouse_simulation_2.gif',
+    'png_path': 'images/warehouse_simulation_final_2.png',
     'gif_fps': 10,
     'gif_dpi': 100,
 }
@@ -166,7 +166,7 @@ def build_warehouse_env() -> GridWorld:
     # ── Scattered loading pallets  (1×1 each) ───────────────────────────
     env.add_obstacle(14, 9)
     env.add_obstacle(15, 11)
-    env.add_obstacle(9, 8)
+    # env.add_obstacle(9, 8)
     env.add_obstacle(16, 9)
 
     return env
