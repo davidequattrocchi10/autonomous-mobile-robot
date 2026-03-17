@@ -2,6 +2,8 @@
 
 **Autonomous robot navigation system with global/local planner architecture, simulated LiDAR, and real-time obstacle avoidance.**
 
+[![Tests](https://github.com/davidequattrocchi10/autonomous-mobile-robot/actions/workflows/tests.yml/badge.svg)](https://github.com/davidequattrocchi10/autonomous-mobile-robot/actions/workflows/tests.yml)
+
 ![Warehouse simulation](images/warehouse_simulation_3.gif)
 ![Warehouse simulation](images/warehouse_simulation_2.gif)
 *AGV navigating active warehouse — A\* global path + DWA local avoidance + forklift detection via simulated LiDAR*
