@@ -1,24 +1,39 @@
+# The name that appears in the Actions tab on GitHub
 name: Tests
 
+# Run this workflow whenever someone pushes to main
+# or opens a pull request targeting main
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
 
+# Opt into Node.js 24 to avoid the Node 16/20 deprecation warning
+# that GitHub Actions will enforce before June 2026
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# Define a JOB called "test"
 jobs:
   test:
+    # Run it on a fresh Ubuntu Linux machine provided by GitHub Actions
     runs-on: ubuntu-latest
-
+    env:
+      # Use a non-interactive matplotlib backend so plots don't try to open a window
+      MPLBACKEND: Agg
     steps:
+       # Download your code onto the Ubuntu machine
       - name: Checkout repository
         uses: actions/checkout@v4
 
+        # Install Python 3.11 on the Ubuntu machine
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+        # Cache (save and restore) pip dependencies to speed up subsequent runs
       - name: Cache pip dependencies
         uses: actions/cache@v4
         with:
@@ -27,10 +42,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
+        # Install pytest and runtime deps explicitly first, then install the package.
+        # This avoids a failure mode where `pip install -e ".[dev]"` partially succeeds
+        # (e.g. optional extras missing) without installing pytest, causing exit code 127.
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]" || (pip install -e . && pip install pytest)
+          pip install pytest numpy matplotlib pillow
+          pip install -e .
 
+        # Run the tests using pytest with verbose output and short tracebacks
       - name: Run tests
         run: pytest -v --tb=short
