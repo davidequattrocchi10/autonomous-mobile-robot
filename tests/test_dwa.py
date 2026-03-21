@@ -415,24 +415,38 @@ class TestComputeCommand:
             w_velocity=0.5,
             v_samples=5,
             omega_samples=11,
+            max_domega=100.0,  # allow full omega range in one step (see below)
         )
-        # Wall of obstacles at x=0.5, right in front of robot at x=0
-        obs = wall_of_obstacles(xs=[0.4, 0.5, 0.6], y=0.0)
+        # Wall of obstacles at x=0.5-0.7, right in front of robot at x=0.
+        obs = wall_of_obstacles(xs=[0.5, 0.6, 0.7], y=0.0)
 
+        # v_cur=0.5 locks the dynamic window to v_min=0.4 (robot cannot brake
+        # to a stop in one timestep). Going straight at v=0.4, omega=0:
+        # step 6 reaches x=0.24 m → 0.26 m from obstacle at x=0.5 → collision.
+        # max_domega=100 opens the full omega range [-pi, pi] so the robot can
+        # execute a sharp turn; the max-turn trajectory stays 0.37 m clear.
+        # The robot MUST steer to avoid the wall.
         v, omega, ok = dwa.compute_command(
             x=0.0, y=0.0, theta=0.0,
-            v_cur=0.0, omega_cur=0.0,
+            v_cur=0.5, omega_cur=0.0,
             goal_x=5.0, goal_y=0.0,
             obstacles=obs,
         )
         # Should find SOME safe trajectory (turn to avoid)
         assert ok is True
+        # Robot must actually turn — straight-line forward would collide
+        assert abs(omega) > 0.05
+        # omega > 0.05 rad/s means meaningful steering, not rounding noise
 
     def test_all_paths_blocked_returns_false(self):
         """
         Surround the robot completely with obstacles at robot_radius distance.
         All trajectories should collide → success=False.
         """
+        # IMPORTANT: These parameters are deliberately restrictive.
+        # max_dv=0.1 + sim_time=0.1 + v_samples=3 creates a tiny dynamic window
+        # that cannot escape the obstacle ring placed around the robot.
+        # If default DWA parameters change, verify this scenario still blocks all paths.
         dwa = make_dwa(
             robot_radius=0.5,
             sim_time=0.1,   # short horizon: robot can't escape in 0.1 s
@@ -512,6 +526,10 @@ class TestComputeCommand:
         regardless of weight ratios. Testing the score formula directly is
         more reliable and more pedagogically meaningful.
         """
+        # WHITE-BOX TEST: verifies the scoring formula math is correct
+        # by calling score functions directly with known inputs.
+        # Integration of scores inside compute_command() is tested separately
+        # by test_open_space_returns_success and test_obstacle_ahead_causes_avoidance.
         dwa = make_dwa(w_heading=2.0, w_clearance=1.0, w_velocity=3.0,
                        clearance_cap=2.0, max_v=1.0)
 

@@ -169,8 +169,8 @@ class TestGridWorldValidation:
 
     def test_is_valid_false_for_out_of_bounds(self, empty_env):
         """Out-of-bounds positions are never valid, regardless of content."""
-        assert empty_env.is_valid(10, 10) is False
-        assert empty_env.is_valid(-1, 0) is False
+        assert not empty_env.is_valid(10, 10)
+        assert not empty_env.is_valid(-1, 0)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -300,3 +300,95 @@ class TestObstacleManager:
 
         assert obs_id not in manager.obstacles
         assert manager.get_statistics()['total_obstacles'] == 0
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# DynamicObstacle: Movement Behaviour
+# ──────────────────────────────────────────────────────────────────────────────
+
+class TestDynamicObstacleMovement:
+    """
+    Verify that LINEAR and RANDOM_WALK obstacles actually move correctly.
+
+    WHY these tests matter: The warehouse demo uses a LINEAR forklift obstacle.
+    If the movement logic is broken, the simulation gives false safety guarantees
+    — the robot thinks the forklift is elsewhere and plans through it.
+    """
+
+    @pytest.fixture
+    def manager(self):
+        """Fresh ObstacleManager for each test (no shared state)."""
+        return ObstacleManager(dt=0.1, cell_size=0.5)
+
+    @pytest.fixture
+    def base_env(self):
+        """10×10 obstacle-free grid — large enough that obstacles don't hit walls."""
+        return GridWorld(width=10, height=10)
+
+    def test_linear_obstacle_moves_in_velocity_direction(self, manager, base_env):
+        """
+        A LINEAR obstacle with velocity (0, 1) should step one cell to the right
+        per update. Starting at (5, 5) it must land on (5, 6) after one update.
+        """
+        obs_id = manager.add_obstacle(start_pos=(5, 5), obstacle_type=ObstacleType.LINEAR)
+        # Set a deterministic velocity so the test doesn't depend on random init
+        manager.obstacles[obs_id].velocity = (0, 1)
+
+        manager.update_all(base_env)
+
+        assert manager.obstacles[obs_id].position == (5, 6)
+
+    def test_linear_obstacle_bounces_off_right_wall(self, manager, base_env):
+        """
+        When a LINEAR obstacle's next step would leave the grid, the move is
+        blocked and velocity is fully negated (bounce). Starting at the right
+        edge (col=9) with velocity (0, 1), after one update the x-component
+        must flip to (0, -1).
+        """
+        obs_id = manager.add_obstacle(start_pos=(5, 9), obstacle_type=ObstacleType.LINEAR)
+        manager.obstacles[obs_id].velocity = (0, 1)   # Heading right, will hit wall
+
+        manager.update_all(base_env)
+
+        assert manager.obstacles[obs_id].velocity == (0, -1)
+
+    def test_linear_obstacle_stays_in_bounds(self, manager, base_env):
+        """
+        Over 20 update steps a LINEAR obstacle must never leave the grid, even
+        after bouncing off walls multiple times.
+        """
+        obs_id = manager.add_obstacle(start_pos=(5, 0), obstacle_type=ObstacleType.LINEAR)
+        manager.obstacles[obs_id].velocity = (0, 1)
+
+        for _ in range(20):
+            manager.update_all(base_env)
+            row, col = manager.obstacles[obs_id].position
+            assert 0 <= row < base_env.height, f"Row {row} out of bounds"
+            assert 0 <= col < base_env.width,  f"Col {col} out of bounds"
+
+    def test_random_walk_obstacle_stays_in_bounds(self, manager, base_env):
+        """
+        Over 20 update steps a RANDOM_WALK obstacle must never leave the grid,
+        regardless of which random direction is chosen each step.
+        """
+        np.random.seed(42)  # Reproducible direction choices
+        obs_id = manager.add_obstacle(start_pos=(5, 5), obstacle_type=ObstacleType.RANDOM_WALK)
+
+        for _ in range(20):
+            manager.update_all(base_env)
+            row, col = manager.obstacles[obs_id].position
+            assert 0 <= row < base_env.height, f"Row {row} out of bounds"
+            assert 0 <= col < base_env.width,  f"Col {col} out of bounds"
+
+    def test_linear_obstacle_occupies_correct_cell_after_move(self, manager, base_env):
+        """
+        After a LINEAR obstacle moves from (5, 5) to (5, 6), the manager must
+        report the new cell as occupied and the old cell as free.
+        """
+        obs_id = manager.add_obstacle(start_pos=(5, 5), obstacle_type=ObstacleType.LINEAR)
+        manager.obstacles[obs_id].velocity = (0, 1)
+
+        manager.update_all(base_env)
+
+        assert manager.is_cell_occupied((5, 6)) is True   # New position
+        assert manager.is_cell_occupied((5, 5)) is False  # Old position vacated

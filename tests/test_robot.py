@@ -338,7 +338,7 @@ class TestRobotNoise:
             noisy.update(v=1.0, omega=0.0, dt=0.1)
         # With 50 steps and noise_std=0.05, drift should be measurable
         total_drift = math.sqrt((clean.x - noisy.x)**2 + (clean.y - noisy.y)**2)
-        assert total_drift > 0.0, "Noisy robot should drift from clean robot"
+        assert total_drift > 0.01, "Noisy robot should drift from clean robot"
 
 
 # =========================================================================
@@ -360,7 +360,7 @@ class TestRobotGridBridge:
         # Move 1 m to the right (2 cells at cell_size=0.5)
         robot.update(v=1.0, omega=0.0, dt=1.0)
         row, col = robot.get_grid_cell()
-        assert col >= 2   # moved at least 2 cells to the right
+        assert col == 2   # moved exactly 2 cells to the right (1 m ÷ 0.5 m/cell)
 
     def test_from_grid_cell_round_trip(self):
         """
