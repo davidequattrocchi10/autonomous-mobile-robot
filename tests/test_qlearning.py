@@ -108,12 +108,14 @@ class TestQLearningTraining:
         collecting reward as training progresses and ε decays.
 
         We use a simple open grid so learning is fast and reliable.
+        300 episodes is sufficient for the 5×5 open grid — fewer than
+        500 reduces test time while still showing reliable convergence.
         """
         agent = QLearningAgent(simple_env, seed=42)
-        rewards = agent.train((0, 0), (4, 4), episodes=500)
+        rewards = agent.train((0, 0), (4, 4), episodes=300)
 
-        first_quarter  = np.mean(rewards[:125])
-        last_quarter   = np.mean(rewards[375:])
+        first_quarter  = np.mean(rewards[:75])
+        last_quarter   = np.mean(rewards[225:])
         assert last_quarter > first_quarter, (
             "Average reward should increase over training "
             f"(first quarter: {first_quarter:.1f}, last: {last_quarter:.1f})"
@@ -258,12 +260,15 @@ class TestQLearningGetPath:
         BFS which can solve any valid scenario on first call.
         """
         agent = QLearningAgent(simple_env, seed=42)
+        start, goal = (2, 2), (4, 4)
         # No train() call — Q-table is all zeros
-        path = agent.get_path((2, 2), (4, 4))
-        # The agent may or may not find a path with zero training;
-        # the important thing is it doesn't raise an exception or loop
-        # (if it does find a path by coincidence, that's OK too)
-        assert path is None or isinstance(path, list)
+        # Test intent: calling get_path() on untrained agent doesn't crash or loop
+        try:
+            path = agent.get_path(start, goal, max_steps=50)
+            # If it returns, it should be None or a list — not an infinite loop
+            assert path is None or isinstance(path, list)
+        except Exception as e:
+            pytest.fail(f"get_path() raised an exception before training: {e}")
 
     def test_goal_unreachable_returns_none(self, isolated_env):
         """
@@ -326,15 +331,15 @@ class TestQLearningStats:
         agent = QLearningAgent(simple_env, seed=42)
         agent.train((0, 0), (4, 4), episodes=500)
         path = agent.get_path((0, 0), (4, 4))
-        if path is not None:
-            assert agent.get_stats()["path_length"] == len(path)
+        assert path is not None, "Agent failed to find path after 500 episodes"
+        assert agent.get_stats()["path_length"] == len(path)
 
     def test_success_true_when_path_found(self, simple_env):
         agent = QLearningAgent(simple_env, seed=42)
         agent.train((0, 0), (4, 4), episodes=500)
         path = agent.get_path((0, 0), (4, 4))
-        if path is not None:
-            assert agent.get_stats()["success"] == True
+        assert path is not None, "Agent failed to find path after 500 episodes"
+        assert agent.get_stats()["success"] == True
 
     def test_success_false_when_no_path(self, isolated_env):
         agent = QLearningAgent(isolated_env, seed=42)
@@ -405,3 +410,33 @@ class TestQLearningParameters:
         agent = QLearningAgent(simple_env, seed=42)
         q = agent.get_q_values((0, 0))
         assert q.shape == (N_ACTIONS,)
+
+    def test_bellman_update_formula(self):
+        """Verify Q(s,a) update matches the exact Bellman formula.
+
+        With alpha=1.0 the entire TD error is applied in one step, so:
+            Q_new = Q_old + 1.0 * (r + γ * max_a'(Q(s', a')) - Q_old)
+                  = r + γ * max_a'(Q(s', a'))          (since Q_old = 0)
+
+        This makes the expected result easy to compute by hand.
+        """
+        env = GridWorld(3, 3)
+        agent = QLearningAgent(env, alpha=1.0, gamma=0.9, epsilon=0.0)
+
+        state      = (1, 1)
+        action     = 0          # UP
+        reward     = 10.0
+        next_state = (0, 1)
+
+        # Set known Q-values
+        agent.q_table[state[0],      state[1],      :] = 0.0
+        agent.q_table[next_state[0], next_state[1], :] = [2.0, 3.0, 1.0, 4.0]
+
+        # Expected: Q(s,a) = 0 + 1.0 * (10 + 0.9 * max(2,3,1,4) - 0) = 13.6
+        agent._bellman_update(state, action, reward, next_state)
+
+        expected = reward + 0.9 * 4.0   # 10 + 0.9 * 4 = 13.6
+        assert abs(agent.q_table[state[0], state[1], action] - expected) < 1e-9, (
+            f"Bellman update incorrect: got {agent.q_table[state[0], state[1], action]:.6f}, "
+            f"expected {expected:.6f}"
+        )

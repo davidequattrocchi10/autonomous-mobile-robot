@@ -236,7 +236,7 @@ class TestCheckPredictiveCollision:
         Robot is 0.1 m away from the forklift's next cell centre,
         moving directly toward it. Distance < robot_radius + cell_size → collision.
 
-        Forklift next cell: (12, 10) → centre = (10.25, 6.25)
+        Forklift next cell: (12, 10) → centre = (5.25, 6.25)
         Robot: placed so that after one step it will be at (10.25, 6.25).
         """
         # forklift next cell (12, 10) → centre = ((10+0.5)*0.5, (12+0.5)*0.5)
@@ -465,6 +465,12 @@ class TestReplanCounterLogic:
         """
         Simulate the counter update logic from update() for a sequence of
         (dwa_ok, predictive_collision) events.  Returns final counter value.
+
+        WARNING: This helper reimplements the counter logic from update() in
+        warehouse_simulation.py. If the branching or increment logic inside
+        update() ever changes, this helper MUST be updated to match — otherwise
+        these tests will silently verify stale (wrong) behavior.
+        Last verified in sync with: warehouse_simulation.py update() function.
         """
         failures = 0
         for dwa_ok, pred_hit in events:

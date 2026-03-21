@@ -170,7 +170,7 @@ class TestRayHitsWall:
         assert ranges[0] < 1.0, \
             f"Wall is ~0.5m away, got {ranges[0]:.3f}"
 
-    def test_ray_into_free_space_returns_max_range(self, walled_env):
+    def test_ray_into_free_space_returns_valid_range(self, walled_env):
         lidar = make_lidar(walled_env, n_beams=1, fov=0.0001, max_range=3.0)
         # Robot at cell (3, 1), firing LEFT (theta=π) — free space in that direction
         x, y = grid_to_continuous(3, 1)
@@ -427,7 +427,9 @@ class TestPartialFOV:
         hits_partial = np.sum(r_partial < partial.max_range)
 
         # The box surrounds the robot, so all beams in both scans should hit
-        assert hits_partial <= hits_full + 1  # allow tiny numeric tolerance
+        # +1 tolerance: boundary beams at exactly ±FOV/2 may be counted
+        # differently due to floating-point rounding at the arc edges
+        assert hits_partial <= hits_full + 1
 
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -212,8 +212,34 @@ class TestRRTPathValidity:
         """Path must avoid wall cells even in a constrained environment."""
         rrt = RRT(walled_env, max_iterations=5000, goal_bias=0.15, seed=42)
         path = rrt.search((0, 0), (0, 4))
-        if path is not None:
-            assert is_path_valid(path, walled_env), "Path must not pass through the wall"
+        assert path is not None, "RRT should find path in walled grid with 5000 iterations"
+        assert is_path_valid(path, walled_env), "Path must not pass through the wall"
+
+    def test_path_is_connected(self, walled_env):
+        """
+        Every consecutive pair of cells in the RRT path must be 8-connected.
+
+        RRT's _steer() rounds a continuous unit vector to the nearest grid cell.
+        A step of length 1 in an arbitrary direction can change BOTH row and col
+        by 1 simultaneously (diagonal move), so strict 4-connectivity is not
+        guaranteed. The correct invariant is Chebyshev distance == 1 per step:
+        max(|Δrow|, |Δcol|) == 1, i.e. both diffs ≤ 1 with at least one == 1.
+        """
+        rrt = RRT(walled_env, max_iterations=5000, goal_bias=0.15, seed=42)
+        path = rrt.search((0, 0), (0, 4))
+        if path is None:
+            pytest.skip("RRT did not find path — connectivity cannot be tested")
+
+        for i in range(len(path) - 1):
+            r1, c1 = path[i]
+            r2, c2 = path[i + 1]
+            row_diff = abs(r2 - r1)
+            col_diff = abs(c2 - c1)
+            # 8-connected: each dimension changes by at most 1
+            assert row_diff <= 1 and col_diff <= 1, (
+                f"Path step {i}→{i+1}: ({r1},{c1})→({r2},{c2}) "
+                f"exceeds 8-connected distance (Δrow={row_diff}, Δcol={col_diff})"
+            )
 
     def test_path_has_at_least_two_cells(self, empty_env):
         """
@@ -379,13 +405,17 @@ class TestRRTParameters:
 
         assert path1 == path2, "Same seed must produce same path"
 
-    def test_different_seeds_may_differ(self, empty_env):
+    def test_different_seeds_both_find_valid_paths(self, empty_env):
         """
-        Different seeds should generally produce different paths.
+        Different seeds must each find a valid path — RRT is reliable
+        across random states in open space.
 
-        NOTE: there is a tiny probability this test fails if both seeds
-        happen to generate the exact same path by coincidence.  In practice
-        on a 10×10 grid this never happens.
+        WHY we do NOT assert path1 != path2:
+        Two different seeds could coincidentally produce the same path
+        (extremely unlikely on a 10×10 grid, but theoretically possible).
+        The meaningful property here is that neither seed causes a failure,
+        not that they diverge. Seed-divergence is implicitly covered by
+        test_seed_produces_identical_paths (same seed → same path).
         """
         rrt1 = RRT(empty_env, max_iterations=2000, seed=0)
         path1 = rrt1.search((0, 0), (9, 9))
@@ -393,11 +423,10 @@ class TestRRTParameters:
         rrt2 = RRT(empty_env, max_iterations=2000, seed=99)
         path2 = rrt2.search((0, 0), (9, 9))
 
-        # Both must find a path
-        assert path1 is not None
-        assert path2 is not None
-        # They are very likely to differ (probabilistic algorithm)
-        # We don't assert they MUST differ — just that both succeed
+        assert path1 is not None, "seed=0 should find a path in open 10×10 grid"
+        assert path2 is not None, "seed=99 should find a path in open 10×10 grid"
+        assert is_path_valid(path1, empty_env)
+        assert is_path_valid(path2, empty_env)
 
 
 # =========================================================================
