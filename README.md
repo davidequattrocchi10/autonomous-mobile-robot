@@ -4,8 +4,17 @@
 
 [![Tests](https://github.com/davidequattrocchi10/autonomous-mobile-robot/actions/workflows/tests.yml/badge.svg)](https://github.com/davidequattrocchi10/autonomous-mobile-robot/actions/workflows/tests.yml)
 
-![Warehouse simulation](images/warehouse_simulation_3.gif)
+![Warehouse simulation — advanced (single forklift, replanning)](images/warehouse_simulation_advanced.gif)
+*AGV navigates warehouse: A\* global path + DWA local avoidance. Forklift blocks the route →
+robot stops, replans with A\*, resumes to goal.*
+
+![Warehouse simulation — env 2 (two forklifts, two replanning events)](images/warehouse_simulation_advanced_env_two.gif)
+*Same pipeline, two forklifts moving in opposite directions. Two independent replanning events prove the mechanism generalises to any warehouse configuration.*
+
+
 ![Warehouse simulation](images/warehouse_simulation_2.gif)
+
+![Warehouse simulation](images/warehouse_simulation_3.gif)
 *AGV navigating active warehouse — A\* global path + DWA local avoidance + forklift detection via simulated LiDAR*
 
 ---
@@ -44,8 +53,10 @@ git clone https://github.com/davidequattrocchi10/autonomous-mobile-robot.git
 cd autonomous-mobile-robot
 pip install -e .
 
-python examples/warehouse_simulation.py   # A* + DWA warehouse demo
-pytest tests/                            
+python examples/warehouse_simulation.py              # A* + DWA warehouse demo
+python examples/warehouse_simulation_advanced.py     # forklift + emergency replanning
+python examples/warehouse_simulation_advanced_env_two.py  # two forklifts, two replanning events
+pytest tests/
 ```
 
 ---
@@ -136,4 +147,5 @@ Total                      217 tests  ✓ all pass
 
 ---
 
-🚧 **Active development** — benchmark table and emergency replanning scenario in progress
+> Both warehouse simulations are self-contained — run them directly with `python examples/<file>.py`.
+> Output GIF and final-frame PNG are written to `images/`.
