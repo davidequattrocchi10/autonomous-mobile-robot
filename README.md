@@ -63,15 +63,21 @@ pytest tests/
 
 ## Algorithm Comparison
 
-> Benchmark table coming soon — running controlled trials across identical scenarios.
+Benchmarked on a 20×20 grid with a wall barrier (gap at one end). Same start/goal for all algorithms.
 
 | Algorithm  | Path Length | Nodes Explored | Time (ms) | Use Case |
 |------------|-------------|----------------|-----------|----------|
-| BFS        | —           | —              | —         | Shortest path, unweighted grid |
-| DFS        | —           | —              | —         | Memory-efficient, non-optimal |
-| A\*        | —           | —              | —         | Optimal, heuristic-guided |
-| RRT        | —           | —              | —         | High-dimensional / continuous spaces |
-| Q-Learning | —           | —              | —         | Unknown environment, learns online |
+| BFS        | 33          | 356            | 3.6       | Shortest path guarantee, unweighted grid |
+| DFS        | 97          | 201            | 2.2       | Memory-efficient, non-optimal |
+| A\*        | 33          | 237            | 6.2       | Optimal + heuristic-guided (fewer expansions than BFS) |
+| RRT ¹      | 31          | 137            | 20.1      | Continuous/high-dimensional spaces — see note ² |
+| Q-Learning | n/a ³       | n/a ³          | n/a ³     | Unknown environment, learns policy online |
+
+¹ RRT path length can be shorter than BFS because it allows diagonal moves (8-connected steering), whereas BFS is 4-connected.
+² RRT is included for algorithm comparison. In the warehouse pipeline, **A\* is used as global planner** — it guarantees an optimal path on a known discrete grid and is fully deterministic. RRT's strength (sampling continuous spaces without an explicit graph) is unnecessary when the map is already a 2D occupancy grid.
+³ Q-Learning does not expand nodes — it trains a value table over episodes. Path quality depends on training time and environment complexity. See design note below.
+
+> **Note on Q-Learning:** Q-Learning operates on the discrete grid (4-connected moves, full map visibility) and functions as a standalone global planner — it does **not** feed into the DWA/LiDAR/robot pipeline. This is intentional: classical planners (A\*, BFS) guarantee optimal paths in known static environments; Q-Learning's strength is learning a policy in an *unknown* environment through trial and error. Integrating Q-Learning with continuous kinematics would require Deep Q-Networks (DQN) or a policy gradient method — a natural next step for this project.
 
 ---
 
@@ -131,18 +137,39 @@ A multi-source BFS (`_compute_clearance_map`) seeds all obstacle cells at distan
 
 ---
 
+### 4. Lookahead targeting instead of nearest-waypoint chasing
+
+**Problem:** DWA chasing the *nearest* A\* waypoint causes the robot to slow at every grid cell and clip inside corners — the robot nearly collides with the inner wall of every turn.
+
+**Decision:** Advance to the *furthest* waypoint within a lookahead radius R (Pure Pursuit style). The robot starts curving earlier, producing wider arcs that naturally clear corners.
+
+**Why it works:** Same principle used in autonomous car path tracking. A larger lookahead produces smoother but less precise tracking; a smaller lookahead is more precise but re-introduces corner clipping. R ≈ 2 cells was found to be the sweet spot for 0.5 m cells.
+
+---
+
+### 5. Step-wise ray marching for LiDAR instead of Bresenham DDA
+
+**Problem:** LiDAR simulation requires finding the first obstacle cell along each beam. Bresenham's line algorithm is exact, but its cell-visitation order depends on slope discontinuities — complex to implement correctly and hard to debug.
+
+**Decision:** Step-wise marching: advance along the ray by a fixed `step_size` (default 0.05 m), convert each point to grid coordinates, stop at the first obstacle or grid boundary.
+
+**Why it works:** At step_size = 0.05 m with 5 m max range → 100 steps per beam. Computation is negligible. The approach is physically intuitive (matches how a real laser pulse propagates), easy to test, and naturally handles any FOV or beam count without special-casing slope edge cases.
+
+---
+
 ## Test Coverage
 
 ```
-tests/test_environment.py   26 tests
-tests/test_planning.py      28 tests
-tests/test_rrt.py           25 tests
-tests/test_qlearning.py     31 tests
-tests/test_robot.py         41 tests
-tests/test_lidar.py         25 tests
-tests/test_dwa.py           41 tests
-─────────────────────────────────────
-Total                      217 tests  ✓ all pass
+tests/test_environment.py          31 tests
+tests/test_planning.py             33 tests
+tests/test_rrt.py                  26 tests
+tests/test_qlearning.py            32 tests
+tests/test_robot.py                41 tests
+tests/test_lidar.py                25 tests
+tests/test_dwa.py                  41 tests
+tests/test_warehouse_simulation.py 30 tests
+──────────────────────────────────────────
+Total                             259 tests  ✓ all pass
 ```
 
 ---
